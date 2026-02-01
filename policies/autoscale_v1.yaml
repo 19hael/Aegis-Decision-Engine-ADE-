@@ -1,0 +1,114 @@
+id: autoscale_policy
+version: "1.0"
+name: Auto-Scaling Policy
+description: Automatically scale services based on CPU and load metrics
+type: autoscale
+
+rules:
+  - id: emergency_scale_up
+    name: Emergency Scale Up
+    priority: 100
+    when:
+      any:
+        - fact: CPUCurrent
+          op: ">="
+          value: 90
+        - fact: LoadScore
+          op: ">="
+          value: 0.9
+    action:
+      type: scale_up
+      target: service
+      params:
+        instances: 3
+        urgency: emergency
+      cost: 50.0
+      risk: 0.2
+    cooldown: 5m
+
+  - id: high_load_scale_up
+    name: High Load Scale Up
+    priority: 80
+    when:
+      all:
+        - fact: CPUCurrent
+          op: ">="
+          value: 70
+        - fact: RequestsPerSec
+          op: ">="
+          value: 1000
+    action:
+      type: scale_up
+      target: service
+      params:
+        instances: 2
+        urgency: high
+      cost: 30.0
+      risk: 0.1
+    cooldown: 10m
+
+  - id: moderate_scale_up
+    name: Moderate Scale Up
+    priority: 60
+    when:
+      all:
+        - fact: CPUCurrent
+          op: ">="
+          value: 60
+        - fact: LatencyP95
+          op: ">="
+          value: 500
+    action:
+      type: scale_up
+      target: service
+      params:
+        instances: 1
+        urgency: normal
+      cost: 15.0
+      risk: 0.05
+    cooldown: 15m
+
+  - id: low_load_scale_down
+    name: Low Load Scale Down
+    priority: 40
+    when:
+      all:
+        - fact: CPUCurrent
+          op: "<="
+          value: 20
+        - fact: RequestsPerSec
+          op: "<="
+          value: 100
+    action:
+      type: scale_down
+      target: service
+      params:
+        instances: 1
+        min_instances: 2
+      cost: 0.0
+      risk: 0.1
+    cooldown: 30m
+
+  - id: circuit_breaker_open
+    name: Open Circuit Breaker
+    priority: 90
+    when:
+      any:
+        - fact: ErrorRate
+          op: ">="
+          value: 0.5
+        - fact: HealthScore
+          op: "<="
+          value: 0.3
+    action:
+      type: open_circuit
+      target: service
+      params:
+        duration: 60s
+      cost: 10.0
+      risk: 0.3
+    cooldown: 1m
+
+defaults:
+  action: allow
+  cooldown: 5m

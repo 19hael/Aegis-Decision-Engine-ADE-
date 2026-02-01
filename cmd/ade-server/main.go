@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/aegis-decision-engine/ade/internal/config"
+	"github.com/aegis-decision-engine/ade/internal/decision"
 	"github.com/aegis-decision-engine/ade/internal/ingest"
+	"github.com/aegis-decision-engine/ade/internal/policy"
 	"github.com/aegis-decision-engine/ade/internal/state"
 	"github.com/aegis-decision-engine/ade/internal/storage/kafka"
 	"github.com/aegis-decision-engine/ade/internal/storage/postgres"
@@ -64,6 +66,20 @@ func main() {
 	stateService := state.NewService(eventStore, featureStore, logger)
 	stateHandler := state.NewHandler(stateService)
 
+	// Initialize decision service
+	policyEngine := policy.NewEngine(logger)
+	var decisionStore *postgres.DecisionStore
+	if pgClient != nil {
+		decisionStore = postgres.NewDecisionStore(pgClient)
+	}
+	decisionService := decision.NewService(policyEngine, decisionStore, logger)
+	decisionHandler := decision.NewHandler(decisionService)
+	
+	// Load default policy
+	if err := decisionHandler.LoadDefaultPolicy(); err != nil {
+		slog.Warn("failed to load default policy", "error", err)
+	}
+
 	// Setup routes
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
@@ -72,6 +88,7 @@ func main() {
 	// Register service routes
 	ingestHandler.RegisterRoutes(mux)
 	stateHandler.RegisterRoutes(mux)
+	decisionHandler.RegisterRoutes(mux)
 
 	server := &http.Server{
 		Addr:         ":" + cfg.Port,
