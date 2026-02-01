@@ -13,6 +13,7 @@ import (
 	"github.com/aegis-decision-engine/ade/internal/decision"
 	"github.com/aegis-decision-engine/ade/internal/ingest"
 	"github.com/aegis-decision-engine/ade/internal/policy"
+	"github.com/aegis-decision-engine/ade/internal/simulation"
 	"github.com/aegis-decision-engine/ade/internal/state"
 	"github.com/aegis-decision-engine/ade/internal/storage/kafka"
 	"github.com/aegis-decision-engine/ade/internal/storage/postgres"
@@ -80,6 +81,10 @@ func main() {
 		slog.Warn("failed to load default policy", "error", err)
 	}
 
+	// Initialize simulation service
+	simulationService := simulation.NewService(logger)
+	simulationHandler := simulation.NewHandler(simulationService)
+
 	// Setup routes
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
@@ -89,6 +94,7 @@ func main() {
 	ingestHandler.RegisterRoutes(mux)
 	stateHandler.RegisterRoutes(mux)
 	decisionHandler.RegisterRoutes(mux)
+	simulationHandler.RegisterRoutes(mux)
 
 	server := &http.Server{
 		Addr:         ":" + cfg.Port,
