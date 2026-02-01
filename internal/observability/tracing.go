@@ -7,6 +7,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/prometheus"
+	otelmetric "go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
@@ -15,7 +16,7 @@ import (
 
 var (
 	tracer oteltrace.Tracer
-	meter  metric.Meter
+	meter  otelmetric.Meter
 )
 
 // InitTracing initializes OpenTelemetry tracing and metrics

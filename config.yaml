@@ -1,0 +1,91 @@
+# Aegis Decision Engine Configuration
+
+server:
+  port: 8080
+  host: "0.0.0.0"
+  read_timeout: 10s
+  write_timeout: 10s
+  shutdown_timeout: 5s
+
+database:
+  url: "postgres://ade:ade@localhost:5432/ade?sslmode=disable"
+  max_connections: 20
+  min_connections: 5
+  max_conn_lifetime: 1h
+  max_conn_idle_time: 30m
+
+redis:
+  url: "redis://localhost:6379/0"
+  password: ""
+  db: 0
+
+kafka:
+  brokers:
+    - "localhost:9092"
+  topics:
+    events: "ade.events"
+    actions: "ade.actions"
+  consumer_group: "ade-consumer"
+
+policies:
+  directory: "./policies"
+  auto_reload: true
+  reload_interval: 30s
+
+features:
+  window_size: 5m
+  snapshot_ttl: 10m
+
+simulation:
+  default_iterations: 1000
+  max_iterations: 10000
+  default_horizon: 10m
+  max_horizon: 15m
+
+actions:
+  default_webhook_timeout: 30s
+  max_retries: 3
+  enable_circuit_breaker: true
+  circuit_breaker:
+    max_failures: 5
+    reset_timeout: 30s
+
+notifications:
+  enabled: false
+  slack:
+    webhook_url: ""
+  email:
+    smtp_host: ""
+    smtp_port: 587
+    username: ""
+    password: ""
+    from: "ade@example.com"
+    to: []
+
+logging:
+  level: "info"
+  format: "json"
+  output: "stdout"
+
+metrics:
+  enabled: true
+  path: "/metrics"
+  
+tracing:
+  enabled: false
+  jaeger:
+    endpoint: "http://localhost:14268/api/traces"
+
+rate_limiting:
+  enabled: true
+  rate: 100
+  burst: 200
+
+security:
+  api_key_header: "X-API-Key"
+  allowed_hosts: []
+  cors:
+    enabled: true
+    allowed_origins: ["*"]
+    allowed_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    allowed_headers: ["*"]
