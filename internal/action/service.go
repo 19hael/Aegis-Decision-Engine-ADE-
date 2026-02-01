@@ -1,23 +1,21 @@
 package action
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"time"
 
 	"github.com/aegis-decision-engine/ade/internal/models"
+	"github.com/aegis-decision-engine/ade/internal/webhook"
 )
 
 // Service handles action execution
 type Service struct {
-	httpClient *http.Client
-	webhookURL string
-	logger     *slog.Logger
-	dryRun     bool
+	webhookClient *webhook.Client
+	webhookURL    string
+	logger        *slog.Logger
+	dryRun        bool
 }
 
 // NewService creates a new action service
@@ -25,13 +23,15 @@ func NewService(webhookURL string, dryRun bool, logger *slog.Logger) *Service {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	
+	webhookConfig := webhook.DefaultConfig()
+	webhookConfig.EnableCircuitBreaker = true
+	
 	return &Service{
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
-		webhookURL: webhookURL,
-		logger:     logger,
-		dryRun:     dryRun,
+		webhookClient: webhook.NewClient(webhookConfig, logger),
+		webhookURL:    webhookURL,
+		logger:        logger,
+		dryRun:        dryRun,
 	}
 }
 
@@ -125,7 +125,19 @@ func (s *Service) Execute(ctx context.Context, req *ActionRequest) (*ActionResul
 	}
 
 	if webhookURL != "" {
-		if err := s.sendWebhook(ctx, webhookURL, webhookPayload); err != nil {
+		webhookReq := &webhook.Request{
+			ID:      req.ActionID,
+			URL:     webhookURL,
+			Method:  "POST",
+			Payload: webhookPayload,
+			Headers: map[string]string{
+				"X-Action-Type": string(req.ActionType),
+				"X-Service-ID":  req.TargetService,
+			},
+		}
+		
+		webhookResp, err := s.webhookClient.Send(ctx, webhookReq)
+		if err != nil {
 			result.Status = "failed"
 			result.ErrorMessage = err.Error()
 			s.logger.Error("webhook failed",
@@ -134,6 +146,9 @@ func (s *Service) Execute(ctx context.Context, req *ActionRequest) (*ActionResul
 			)
 			return result, err
 		}
+		
+		result.ResponseCode = webhookResp.StatusCode
+		result.ResponseBody = string(webhookResp.Body)
 	}
 
 	now := time.Now()
@@ -199,32 +214,7 @@ func (s *Service) ExecuteBatch(ctx context.Context, requests []*ActionRequest) (
 	return results, nil
 }
 
-func (s *Service) sendWebhook(ctx context.Context, url string, payload map[string]interface{}) error {
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("failed to marshal webhook payload: %w", err)
-	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(body))
-	if err != nil {
-		return fmt.Errorf("failed to create webhook request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-ADE-Action", "true")
-
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("webhook request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("webhook returned error status: %d", resp.StatusCode)
-	}
-
-	return nil
-}
 
 // GetActionTypeFromString converts string to ActionType
 func GetActionTypeFromString(s string) models.ActionType {
