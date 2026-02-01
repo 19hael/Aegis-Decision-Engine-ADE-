@@ -60,7 +60,7 @@ func (c *Client) CreateTopic(ctx context.Context, topic string, partitions int) 
 		return fmt.Errorf("failed to get controller: %w", err)
 	}
 
-	controllerConn, err := kafka.DialContext(ctx, "tcp", controller.Host+":"+controller.Port)
+	controllerConn, err := kafka.DialContext(ctx, "tcp", fmt.Sprintf("%s:%d", controller.Host, controller.Port))
 	if err != nil {
 		return fmt.Errorf("failed to connect to controller: %w", err)
 	}

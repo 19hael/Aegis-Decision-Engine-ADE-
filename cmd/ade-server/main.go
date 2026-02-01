@@ -11,6 +11,7 @@ import (
 
 	"github.com/aegis-decision-engine/ade/internal/config"
 	"github.com/aegis-decision-engine/ade/internal/ingest"
+	"github.com/aegis-decision-engine/ade/internal/state"
 	"github.com/aegis-decision-engine/ade/internal/storage/kafka"
 	"github.com/aegis-decision-engine/ade/internal/storage/postgres"
 )
@@ -50,21 +51,27 @@ func main() {
 
 	// Initialize stores
 	var eventStore *postgres.EventStore
+	var featureStore *postgres.FeatureStore
 	if pgClient != nil {
 		eventStore = postgres.NewEventStore(pgClient)
+		featureStore = postgres.NewFeatureStore(pgClient)
 	}
 
 	// Initialize services
 	ingestService := ingest.NewService(eventStore, eventsWriter, logger)
 	ingestHandler := ingest.NewHandler(ingestService)
 
+	stateService := state.NewService(eventStore, featureStore, logger)
+	stateHandler := state.NewHandler(stateService)
+
 	// Setup routes
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
 	mux.HandleFunc("/ready", readyHandler(pgClient))
 	
-	// Register ingest routes
+	// Register service routes
 	ingestHandler.RegisterRoutes(mux)
+	stateHandler.RegisterRoutes(mux)
 
 	server := &http.Server{
 		Addr:         ":" + cfg.Port,
