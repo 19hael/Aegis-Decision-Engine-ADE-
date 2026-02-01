@@ -14,11 +14,14 @@ import (
 	"github.com/aegis-decision-engine/ade/internal/decision"
 	"github.com/aegis-decision-engine/ade/internal/feedback"
 	"github.com/aegis-decision-engine/ade/internal/ingest"
+	"github.com/aegis-decision-engine/ade/internal/middleware"
 	"github.com/aegis-decision-engine/ade/internal/policy"
+	"github.com/aegis-decision-engine/ade/internal/ratelimit"
 	"github.com/aegis-decision-engine/ade/internal/simulation"
 	"github.com/aegis-decision-engine/ade/internal/state"
 	"github.com/aegis-decision-engine/ade/internal/storage/kafka"
 	"github.com/aegis-decision-engine/ade/internal/storage/postgres"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
@@ -37,7 +40,6 @@ func main() {
 	pgClient, err := postgres.NewClient(cfg)
 	if err != nil {
 		slog.Error("failed to connect to postgres", "error", err)
-		// Continue without DB for now in dev
 		slog.Warn("running without database connection")
 	} else {
 		defer pgClient.Close()
@@ -88,7 +90,7 @@ func main() {
 	simulationHandler := simulation.NewHandler(simulationService)
 
 	// Initialize action service
-	actionService := action.NewService("", false, logger) // No default webhook, dry-run off
+	actionService := action.NewService("", false, logger)
 	actionHandler := action.NewHandler(actionService)
 
 	// Initialize feedback service
@@ -99,6 +101,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
 	mux.HandleFunc("/ready", readyHandler(pgClient))
+	mux.Handle("/metrics", promhttp.Handler())
 	
 	// Register service routes
 	ingestHandler.RegisterRoutes(mux)
@@ -108,9 +111,22 @@ func main() {
 	actionHandler.RegisterRoutes(mux)
 	feedbackHandler.RegisterRoutes(mux)
 
+	// Setup middleware chain
+	// Order: Recovery -> Rate Limit -> Logging -> Handler
+	rateLimiter := ratelimit.NewRateLimiter(100, 200) // 100 req/s, burst 200
+	
+	recoveryMiddleware := middleware.NewRecoveryMiddleware(logger)
+	loggingMiddleware := middleware.NewLoggingMiddleware(logger)
+	rateLimitMiddleware := ratelimit.Middleware(rateLimiter)
+
+	var handler http.Handler = mux
+	handler = loggingMiddleware.Wrap(handler)
+	handler = rateLimitMiddleware(handler)
+	handler = recoveryMiddleware.Wrap(handler)
+
 	server := &http.Server{
 		Addr:         ":" + cfg.Port,
-		Handler:      mux,
+		Handler:      handler,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	}
@@ -122,7 +138,7 @@ func main() {
 		}
 	}()
 
-	slog.Info("server started", "addr", server.Addr)
+	slog.Info("server started", "addr", server.Addr, "metrics", "http://localhost:"+cfg.Port+"/metrics")
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
