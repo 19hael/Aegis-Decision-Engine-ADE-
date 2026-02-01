@@ -10,6 +10,9 @@ import (
 	"time"
 
 	"github.com/aegis-decision-engine/ade/internal/config"
+	"github.com/aegis-decision-engine/ade/internal/ingest"
+	"github.com/aegis-decision-engine/ade/internal/storage/kafka"
+	"github.com/aegis-decision-engine/ade/internal/storage/postgres"
 )
 
 func main() {
@@ -24,10 +27,44 @@ func main() {
 
 	slog.Info("starting ADE server", "version", cfg.Version, "port", cfg.Port)
 
+	// Initialize PostgreSQL
+	pgClient, err := postgres.NewClient(cfg)
+	if err != nil {
+		slog.Error("failed to connect to postgres", "error", err)
+		// Continue without DB for now in dev
+		slog.Warn("running without database connection")
+	} else {
+		defer pgClient.Close()
+		slog.Info("connected to postgres")
+	}
+
+	// Initialize Kafka
+	kafkaClient := kafka.NewClient(cfg.KafkaBrokers)
+	if err := kafkaClient.Health(context.Background()); err != nil {
+		slog.Warn("kafka not available", "error", err)
+	}
+
+	// Create Kafka writer for events topic
+	eventsWriter := kafkaClient.NewWriter("ade.events")
+	defer eventsWriter.Close()
+
+	// Initialize stores
+	var eventStore *postgres.EventStore
+	if pgClient != nil {
+		eventStore = postgres.NewEventStore(pgClient)
+	}
+
+	// Initialize services
+	ingestService := ingest.NewService(eventStore, eventsWriter, logger)
+	ingestHandler := ingest.NewHandler(ingestService)
+
+	// Setup routes
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
-	mux.HandleFunc("/ready", readyHandler)
-	mux.HandleFunc("/ingest", ingestHandler)
+	mux.HandleFunc("/ready", readyHandler(pgClient))
+	
+	// Register ingest routes
+	ingestHandler.RegisterRoutes(mux)
 
 	server := &http.Server{
 		Addr:         ":" + cfg.Port,
@@ -42,6 +79,8 @@ func main() {
 			os.Exit(1)
 		}
 	}()
+
+	slog.Info("server started", "addr", server.Addr)
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -65,19 +104,20 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"status":"healthy"}`))
 }
 
-func readyHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status":"ready"}`))
-}
+func readyHandler(pgClient *postgres.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		status := "ready"
+		code := http.StatusOK
 
-func ingestHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
-		return
+		if pgClient != nil {
+			if err := pgClient.Health(r.Context()); err != nil {
+				status = "not_ready"
+				code = http.StatusServiceUnavailable
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(code)
+		w.Write([]byte(`{"status":"` + status + `"}`))
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusAccepted)
-	w.Write([]byte(`{"status":"accepted","id":"evt-001"}`))
 }
