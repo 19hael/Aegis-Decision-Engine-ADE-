@@ -30,13 +30,13 @@ const (
 type ActionType string
 
 const (
-	ActionTypeScaleUp       ActionType = "scale_up"
-	ActionTypeScaleDown     ActionType = "scale_down"
-	ActionTypeThrottle      ActionType = "throttle"
-	ActionTypeUnthrottle    ActionType = "unthrottle"
-	ActionTypeOpenCircuit   ActionType = "open_circuit"
-	ActionTypeCloseCircuit  ActionType = "close_circuit"
-	ActionTypeWebhook       ActionType = "webhook"
+	ActionTypeScaleUp      ActionType = "scale_up"
+	ActionTypeScaleDown    ActionType = "scale_down"
+	ActionTypeThrottle     ActionType = "throttle"
+	ActionTypeUnthrottle   ActionType = "unthrottle"
+	ActionTypeOpenCircuit  ActionType = "open_circuit"
+	ActionTypeCloseCircuit ActionType = "close_circuit"
+	ActionTypeWebhook      ActionType = "webhook"
 )
 
 // DecisionRecord represents a decision made by the system
@@ -58,33 +58,6 @@ type DecisionRecord struct {
 	CreatedAt       time.Time       `json:"created_at" db:"created_at"`
 }
 
-// DecisionTrace represents the audit trail of a decision
-type DecisionTrace struct {
-	ID               string          `json:"id" db:"id"`
-	TraceID          string          `json:"trace_id" db:"trace_id"`
-	DecisionID       string          `json:"decision_id" db:"decision_id"`
-	PolicyID         string          `json:"policy_id" db:"policy_id"`
-	PolicyVersion    string          `json:"policy_version" db:"policy_version"`
-	TraceData        json.RawMessage `json:"trace_data" db:"trace_data"`
-	RulesEvaluated   json.RawMessage `json:"rules_evaluated" db:"rules_evaluated"`
-	RulesMatched     json.RawMessage `json:"rules_matched" db:"rules_matched"`
-	FeaturesUsed     json.RawMessage `json:"features_used" db:"features_used"`
-	ExecutionTimeMs  int             `json:"execution_time_ms" db:"execution_time_ms"`
-	CreatedAt        time.Time       `json:"created_at" db:"created_at"`
-}
-
-// TraceRule represents a single rule evaluation in a trace
-type TraceRule struct {
-	RuleID      string          `json:"rule_id"`
-	Name        string          `json:"name"`
-	Condition   string          `json:"condition"`
-	Evaluated   bool            `json:"evaluated"`
-	Matched     bool            `json:"matched"`
-	Priority    int             `json:"priority"`
-	Action      ActionType      `json:"action,omitempty"`
-	Reason      string          `json:"reason,omitempty"`
-}
-
 // Action represents a single action to be executed
 type Action struct {
 	Type    ActionType      `json:"type"`
@@ -94,14 +67,41 @@ type Action struct {
 	Risk    float64         `json:"risk,omitempty"`
 }
 
+// DecisionTrace represents the audit trail of a decision
+type DecisionTrace struct {
+	ID              string          `json:"id" db:"id"`
+	TraceID         string          `json:"trace_id" db:"trace_id"`
+	DecisionID      string          `json:"decision_id" db:"decision_id"`
+	PolicyID        string          `json:"policy_id" db:"policy_id"`
+	PolicyVersion   string          `json:"policy_version" db:"policy_version"`
+	TraceData       json.RawMessage `json:"trace_data" db:"trace_data"`
+	RulesEvaluated  json.RawMessage `json:"rules_evaluated" db:"rules_evaluated"`
+	RulesMatched    json.RawMessage `json:"rules_matched" db:"rules_matched"`
+	FeaturesUsed    json.RawMessage `json:"features_used" db:"features_used"`
+	ExecutionTimeMs int             `json:"execution_time_ms" db:"execution_time_ms"`
+	CreatedAt       time.Time       `json:"created_at" db:"created_at"`
+}
+
+// TraceRule represents a single rule evaluation in a trace
+type TraceRule struct {
+	RuleID    string     `json:"rule_id"`
+	Name      string     `json:"name"`
+	Condition string     `json:"condition"`
+	Evaluated bool       `json:"evaluated"`
+	Matched   bool       `json:"matched"`
+	Priority  int        `json:"priority"`
+	Action    ActionType `json:"action,omitempty"`
+	Reason    string     `json:"reason,omitempty"`
+}
+
 // DecisionRequest represents a request to make a decision
 type DecisionRequest struct {
-	ServiceID     string         `json:"service_id"`
-	DecisionType  DecisionType   `json:"decision_type"`
-	Features      *ServiceFeatures `json:"features,omitempty"`
-	DryRun        bool           `json:"dry_run"`
-	Simulate      bool           `json:"simulate"`
-	IdempotencyKey string        `json:"idempotency_key"`
+	ServiceID      string           `json:"service_id"`
+	DecisionType   DecisionType     `json:"decision_type"`
+	Features       *ServiceFeatures `json:"features,omitempty"`
+	DryRun         bool             `json:"dry_run"`
+	Simulate       bool             `json:"simulate"`
+	IdempotencyKey string           `json:"idempotency_key"`
 }
 
 // DecisionResponse represents the response from a decision
@@ -113,4 +113,14 @@ type DecisionResponse struct {
 	TraceID        string         `json:"trace_id"`
 	DryRun         bool           `json:"dry_run"`
 	Timestamp      time.Time      `json:"timestamp"`
+}
+
+// DecisionFilters for querying decisions
+type DecisionFilters struct {
+	ServiceID string
+	PolicyID  string
+	From      time.Time
+	To        time.Time
+	Result    string
+	Limit     int
 }

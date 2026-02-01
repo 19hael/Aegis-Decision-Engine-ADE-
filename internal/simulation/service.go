@@ -21,7 +21,6 @@ func NewService(logger *slog.Logger) *Service {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	// Seed random for Monte Carlo
 	rand.Seed(time.Now().UnixNano())
 	return &Service{
 		logger: logger,
@@ -34,9 +33,9 @@ type SimulationRequest struct {
 	PolicyID       string                  `json:"policy_id"`
 	PolicyVersion  string                  `json:"policy_version"`
 	SnapshotID     string                  `json:"snapshot_id"`
-	Scenario       string                  `json:"scenario"`        // normal, high_load, failure
-	HorizonMinutes int                     `json:"horizon_minutes"` // 5-15 minutes
-	Iterations     int                     `json:"iterations"`      // Number of Monte Carlo runs
+	Scenario       string                  `json:"scenario"`
+	HorizonMinutes int                     `json:"horizon_minutes"`
+	Iterations     int                     `json:"iterations"`
 	CurrentState   *models.ServiceFeatures `json:"current_state"`
 }
 
@@ -45,17 +44,14 @@ func (r *SimulationRequest) Validate() error {
 	if r.ServiceID == "" {
 		return fmt.Errorf("service_id is required")
 	}
-	if r.PolicyID == "" {
-		return fmt.Errorf("policy_id is required")
-	}
 	if r.CurrentState == nil {
 		return fmt.Errorf("current_state is required")
 	}
 	if r.HorizonMinutes < 5 || r.HorizonMinutes > 15 {
-		r.HorizonMinutes = 10 // Default
+		r.HorizonMinutes = 10
 	}
 	if r.Iterations < 100 {
-		r.Iterations = 1000 // Default
+		r.Iterations = 1000
 	}
 	if r.Scenario == "" {
 		r.Scenario = "normal"
@@ -65,40 +61,39 @@ func (r *SimulationRequest) Validate() error {
 
 // SimulationResult represents the result of a simulation
 type SimulationResult struct {
-	RunID           string                 `json:"run_id"`
-	Status          string                 `json:"status"`
-	Scenario        string                 `json:"scenario"`
-	HorizonMinutes  int                    `json:"horizon_minutes"`
-	Iterations      int                    `json:"iterations"`
-	ProjectedStates []ProjectedState       `json:"projected_states"`
-	Aggregates      SimulationAggregates   `json:"aggregates"`
-	CostProjection  float64                `json:"cost_projection"`
-	RiskScore       float64                `json:"risk_score"`
-	Recommendation  string                 `json:"recommendation"`
-	Confidence      float64                `json:"confidence"`
-	StartedAt       time.Time              `json:"started_at"`
-	CompletedAt     time.Time              `json:"completed_at"`
+	RunID           string               `json:"run_id"`
+	Status          string               `json:"status"`
+	Scenario        string               `json:"scenario"`
+	HorizonMinutes  int                  `json:"horizon_minutes"`
+	Iterations      int                  `json:"iterations"`
+	ProjectedStates []ProjectedState     `json:"projected_states"`
+	Aggregates      SimulationAggregates `json:"aggregates"`
+	CostProjection  float64              `json:"cost_projection"`
+	RiskScore       float64              `json:"risk_score"`
+	Recommendation  string               `json:"recommendation"`
+	Confidence      float64              `json:"confidence"`
+	StartedAt       time.Time            `json:"started_at"`
+	CompletedAt     time.Time            `json:"completed_at"`
 }
 
 // ProjectedState represents a state at a future point in time
 type ProjectedState struct {
-	Minute      int     `json:"minute"`
-	CPUAvg      float64 `json:"cpu_avg"`
-	CPUP50      float64 `json:"cpu_p50"`
-	CPUP95      float64 `json:"cpu_p95"`
-	LatencyAvg  float64 `json:"latency_avg"`
-	ErrorRate   float64 `json:"error_rate"`
-	Probability float64 `json:"probability"`
+	Minute     int     `json:"minute"`
+	CPUAvg     float64 `json:"cpu_avg"`
+	CPUP50     float64 `json:"cpu_p50"`
+	CPUP95     float64 `json:"cpu_p95"`
+	LatencyAvg float64 `json:"latency_avg"`
+	ErrorRate  float64 `json:"error_rate"`
 }
 
 // SimulationAggregates contains aggregate statistics
 type SimulationAggregates struct {
-	ProbabilityOverload      float64 `json:"probability_overload"`       // CPU > 90%
-	ProbabilityHighLatency   float64 `json:"probability_high_latency"`   // Latency > 1000ms
-	ProbabilityErrorSpike    float64 `json:"probability_error_spike"`    // Error rate > 10%
-	ExpectedCost             float64 `json:"expected_cost"`
-	WorstCaseCost            float64 `json:"worst_case_cost"`
-	BestCaseCost             float64 `json:"best_case_cost"`
+	ProbabilityOverload     float64 `json:"probability_overload"`
+	ProbabilityHighLatency  float64 `json:"probability_high_latency"`
+	ProbabilityErrorSpike   float64 `json:"probability_error_spike"`
+	ExpectedCost            float64 `json:"expected_cost"`
+	WorstCaseCost           float64 `json:"worst_case_cost"`
+	BestCaseCost            float64 `json:"best_case_cost"`
 }
 
 // Run executes a Monte Carlo simulation
@@ -143,10 +138,9 @@ func (s *Service) Run(ctx context.Context, req *SimulationRequest) (*SimulationR
 	result.Status = "completed"
 	result.CompletedAt = time.Now()
 
-	duration := time.Since(start)
 	s.logger.Info("simulation completed",
 		"run_id", runID,
-		"duration_ms", duration.Milliseconds(),
+		"duration_ms", time.Since(start).Milliseconds(),
 		"risk_score", result.RiskScore,
 		"recommendation", result.Recommendation,
 	)
@@ -157,61 +151,43 @@ func (s *Service) Run(ctx context.Context, req *SimulationRequest) (*SimulationR
 func (s *Service) projectState(current *models.ServiceFeatures, horizon int, scenario string) []ProjectedState {
 	states := make([]ProjectedState, horizon)
 	
-	// Base parameters from current state
 	cpu := current.CPUCurrent
 	latency := current.LatencyP95
 	errorRate := current.ErrorRate
-	rps := current.RequestsPerSec
 
-	// Scenario modifiers
+	// Scenario parameters
 	cpuTrend := 0.0
-	rpsTrend := 0.0
 	errorTrend := 0.0
 	noiseFactor := 0.1
 
 	switch scenario {
 	case "high_load":
-		rpsTrend = 0.05      // 5% increase per minute
 		cpuTrend = 0.03
 		noiseFactor = 0.15
 	case "failure":
 		errorTrend = 0.02
-		cpuTrend = -0.01    // CPU drops as errors spike
 		noiseFactor = 0.2
 	case "recovery":
-		rpsTrend = -0.02
 		cpuTrend = -0.02
 		noiseFactor = 0.08
-	default: // normal
-		noiseFactor = 0.1
-		// Slight random drift
-		if rand.Float64() > 0.5 {
-			rpsTrend = 0.01
-		} else {
-			rpsTrend = -0.005
-		}
 	}
 
 	for minute := 1; minute <= horizon; minute++ {
-		// Apply trends with random noise
 		cpu = cpu * (1 + cpuTrend + noiseFactor*(rand.Float64()-0.5))
-		rps = rps * (1 + rpsTrend + noiseFactor*(rand.Float64()-0.5))
 		errorRate = math.Min(1.0, errorRate*(1+errorTrend+noiseFactor*(rand.Float64()-0.5)))
 		latency = latency * (1 + (cpu-50)/200 + noiseFactor*(rand.Float64()-0.5))
 
-		// Ensure bounds
 		cpu = math.Max(0, math.Min(100, cpu))
-		rps = math.Max(0, rps)
+		errorRate = math.Max(0, math.Min(1, errorRate))
 		latency = math.Max(0, latency)
 
 		states[minute-1] = ProjectedState{
-			Minute:      minute,
-			CPUAvg:      cpu,
-			CPUP50:      cpu * (0.9 + 0.2*rand.Float64()),
-			CPUP95:      cpu * (1.1 + 0.3*rand.Float64()),
-			LatencyAvg:  latency,
-			ErrorRate:   errorRate,
-			Probability: 1.0 / float64(horizon),
+			Minute:     minute,
+			CPUAvg:     cpu,
+			CPUP50:     cpu * (0.9 + 0.2*rand.Float64()),
+			CPUP95:     cpu * (1.1 + 0.3*rand.Float64()),
+			LatencyAvg: latency,
+			ErrorRate:  errorRate,
 		}
 	}
 
@@ -270,7 +246,6 @@ func (s *Service) calculateAggregates(projections [][]ProjectedState, horizon in
 			if state.ErrorRate > 0.1 {
 				projErrorSpike = true
 			}
-			// Simple cost model: cost per minute based on CPU
 			projCost += 0.1 + state.CPUAvg/100.0*0.5
 		}
 
@@ -306,8 +281,6 @@ func (s *Service) calculateAggregates(projections [][]ProjectedState, horizon in
 
 func (s *Service) calculateCostProjection(agg SimulationAggregates, scenario string) float64 {
 	baseCost := agg.ExpectedCost
-	
-	// Scenario risk multiplier
 	switch scenario {
 	case "high_load":
 		return baseCost * 1.5
@@ -315,17 +288,14 @@ func (s *Service) calculateCostProjection(agg SimulationAggregates, scenario str
 		return baseCost * 2.0
 	case "recovery":
 		return baseCost * 0.8
-	default:
-		return baseCost
 	}
+	return baseCost
 }
 
 func (s *Service) calculateRiskScore(agg SimulationAggregates) float64 {
-	// Weighted risk score 0-1
 	risk := agg.ProbabilityOverload*0.4 + 
 		agg.ProbabilityHighLatency*0.3 + 
 		agg.ProbabilityErrorSpike*0.3
-	
 	return math.Min(1.0, risk)
 }
 
@@ -336,13 +306,10 @@ func (s *Service) generateRecommendation(result *SimulationResult) string {
 		return "scale_up_prepare"
 	} else if result.RiskScore > 0.3 {
 		return "monitor_closely"
-	} else if result.Aggregates.ExpectedCost > result.Aggregates.BestCaseCost*1.5 {
-		return "optimize_cost"
 	}
 	return "maintain"
 }
 
 func (s *Service) calculateConfidence(iterations int) float64 {
-	// More iterations = higher confidence, asymptotic to 0.95
 	return math.Min(0.95, 0.5+float64(iterations)/20000.0)
 }

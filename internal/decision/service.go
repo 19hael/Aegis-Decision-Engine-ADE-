@@ -14,9 +14,9 @@ import (
 
 // Service handles decision making
 type Service struct {
-	policyEngine   *policy.Engine
-	decisionStore  *postgres.DecisionStore
-	logger         *slog.Logger
+	policyEngine  *policy.Engine
+	decisionStore *postgres.DecisionStore
+	logger        *slog.Logger
 }
 
 // NewService creates a new decision service
@@ -35,11 +35,9 @@ func NewService(policyEngine *policy.Engine, decisionStore *postgres.DecisionSto
 func (s *Service) MakeDecision(ctx context.Context, req *models.DecisionRequest, pol *policy.Policy) (*models.DecisionResponse, error) {
 	start := time.Now()
 	
-	// Generate IDs
 	decisionID := fmt.Sprintf("dec-%d", time.Now().UnixNano())
 	traceID := fmt.Sprintf("trace-%d", time.Now().UnixNano())
 
-	// Evaluate policy
 	result, allResults := s.policyEngine.Evaluate(ctx, pol, req.Features)
 
 	// Build actions
@@ -84,7 +82,7 @@ func (s *Service) MakeDecision(ctx context.Context, req *models.DecisionRequest,
 			ServiceID:       req.ServiceID,
 			PolicyID:        pol.ID,
 			PolicyVersion:   pol.Version,
-			SnapshotID:      req.Features.ServiceID + "-snap", // Simplified
+			SnapshotID:      req.Features.ServiceID + "-snap",
 			DecisionType:    models.DecisionType(pol.Type),
 			DecisionResult:  decisionResult,
 			Actions:         actionsJSON,
@@ -133,6 +131,30 @@ func (s *Service) MakeDecision(ctx context.Context, req *models.DecisionRequest,
 		DryRun:         req.DryRun,
 		Timestamp:      time.Now(),
 	}, nil
+}
+
+// GetDecision retrieves a decision by ID
+func (s *Service) GetDecision(ctx context.Context, decisionID string) (*models.DecisionRecord, error) {
+	if s.decisionStore == nil {
+		return nil, fmt.Errorf("decision store not available")
+	}
+	return s.decisionStore.GetByID(ctx, decisionID)
+}
+
+// GetDecisionTrace retrieves the trace for a decision
+func (s *Service) GetDecisionTrace(ctx context.Context, decisionID string) (*models.DecisionTrace, error) {
+	if s.decisionStore == nil {
+		return nil, fmt.Errorf("decision store not available")
+	}
+	return s.decisionStore.GetTraceByDecisionID(ctx, decisionID)
+}
+
+// ListDecisions lists decisions with filters
+func (s *Service) ListDecisions(ctx context.Context, filters models.DecisionFilters) ([]*models.DecisionRecord, error) {
+	if s.decisionStore == nil {
+		return nil, fmt.Errorf("decision store not available")
+	}
+	return s.decisionStore.ListByFilters(ctx, filters)
 }
 
 func getActionCost(pol *policy.Policy, ruleID string) float64 {

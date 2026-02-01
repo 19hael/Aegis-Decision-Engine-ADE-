@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math"
 	"time"
 
 	"github.com/aegis-decision-engine/ade/internal/models"
@@ -34,7 +33,7 @@ func NewService(eventStore *postgres.EventStore, featureStore *postgres.FeatureS
 // CalculateFeaturesRequest represents a request to calculate features
 type CalculateFeaturesRequest struct {
 	ServiceID string        `json:"service_id"`
-	Window    time.Duration `json:"window"` // Lookback window (default 5m)
+	Window    time.Duration `json:"window"`
 }
 
 // CalculateFeatures calculates features for a service from recent events
@@ -46,7 +45,6 @@ func (s *Service) CalculateFeatures(ctx context.Context, req *CalculateFeaturesR
 	now := time.Now()
 	from := now.Add(-req.Window)
 
-	// Fetch recent metrics events for this service
 	events, err := s.eventStore.GetByService(ctx, req.ServiceID, from, now, 1000)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch events: %w", err)
@@ -56,7 +54,7 @@ func (s *Service) CalculateFeatures(ctx context.Context, req *CalculateFeaturesR
 		return nil, fmt.Errorf("no events found for service %s in window", req.ServiceID)
 	}
 
-	features, err := calculateFeaturesFromEvents(req.ServiceID, events)
+	features, err := models.CalculateFeatures(req.ServiceID, events)
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate features: %w", err)
 	}
@@ -74,7 +72,6 @@ func (s *Service) CalculateFeatures(ctx context.Context, req *CalculateFeaturesR
 	if s.featureStore != nil {
 		if err := s.featureStore.Store(ctx, snapshot); err != nil {
 			s.logger.Warn("failed to store feature snapshot", "error", err)
-			// Don't fail, just log
 		}
 	}
 
@@ -96,158 +93,33 @@ func (s *Service) GetLatestFeatures(ctx context.Context, serviceID string) (*mod
 	return s.featureStore.GetServiceFeatures(ctx, serviceID)
 }
 
-// calculateFeaturesFromEvents computes features from a list of events
-func calculateFeaturesFromEvents(serviceID string, events []models.Event) (*models.ServiceFeatures, error) {
-	features := &models.ServiceFeatures{
-		ServiceID: serviceID,
-		Timestamp: time.Now(),
+// GetServiceState returns the current state of a service including features
+func (s *Service) GetServiceState(ctx context.Context, serviceID string) (*ServiceState, error) {
+	features, err := s.GetLatestFeatures(ctx, serviceID)
+	if err != nil {
+		return nil, err
 	}
 
-	var metricsList []models.MetricsPayload
-
-	for _, evt := range events {
-		if evt.EventType != models.EventTypeMetrics {
-			continue
-		}
-
-		metrics, err := evt.GetMetricsPayload()
-		if err != nil {
-			continue
-		}
-		metricsList = append(metricsList, *metrics)
+	stats, err := s.eventStore.GetStats(ctx, serviceID)
+	if err != nil {
+		s.logger.Warn("failed to get event stats", "error", err)
+		stats = &models.EventStats{}
 	}
 
-	if len(metricsList) == 0 {
-		return nil, fmt.Errorf("no metrics events found")
-	}
-
-	// Calculate aggregates
-	var cpuSum, latencySum, errorRateSum, rpsSum float64
-	var queueSum int
-	cpuValues := make([]float64, 0, len(metricsList))
-	latencyValues := make([]float64, 0, len(metricsList))
-
-	for _, m := range metricsList {
-		cpuSum += m.CPU
-		cpuValues = append(cpuValues, m.CPU)
-
-		latencySum += m.Latency
-		latencyValues = append(latencyValues, m.Latency)
-
-		errorRateSum += m.ErrorRate
-		rpsSum += m.RequestsPerSec
-		queueSum += m.QueueDepth
-	}
-
-	n := float64(len(metricsList))
-	features.CPUCurrent = metricsList[len(metricsList)-1].CPU
-	features.CPUAvg5m = cpuSum / n
-
-	features.LatencyP50 = percentile(latencyValues, 0.5)
-	features.LatencyP95 = percentile(latencyValues, 0.95)
-	features.LatencyP99 = percentile(latencyValues, 0.99)
-
-	features.ErrorRate = errorRateSum / n
-	features.RequestsPerSec = rpsSum / n
-	features.QueueDepth = metricsList[len(metricsList)-1].QueueDepth
-	features.QueueDepthAvg5m = float64(queueSum) / n
-
-	// Calculate EMA (Exponential Moving Average) - alpha = 0.3
-	features.CPUEMA = calculateEMA(cpuValues, 0.3)
-	features.LatencyEMA = calculateEMA(latencyValues, 0.3)
-
-	// Calculate trend
-	features.CPUTrend = calculateTrend(cpuValues)
-	features.RequestsTrend = calculateTrend(extractRequests(metricsList))
-
-	// Calculate composite scores
-	features.LoadScore = math.Min(1.0, features.CPUCurrent/100.0*0.5+features.QueueDepthAvg5m/100.0*0.3+features.ErrorRate*0.2)
-	features.HealthScore = math.Max(0, 1.0-features.ErrorRate*2-features.CPUCurrent/200.0)
-
-	// Throttling risk (high when CPU high AND latency high)
-	if features.CPUCurrent > 70 && features.LatencyP95 > 500 {
-		features.ThrottlingRisk = math.Min(1.0, (features.CPUCurrent-70)/30.0*0.7+(features.LatencyP95-500)/500.0*0.3)
-	}
-
-	return features, nil
+	return &ServiceState{
+		ServiceID:    serviceID,
+		Features:     features,
+		EventStats:   stats,
+		LastUpdated:  features.Timestamp,
+	}, nil
 }
 
-func percentile(sorted []float64, p float64) float64 {
-	if len(sorted) == 0 {
-		return 0
-	}
-	// Simple sort for percentile calculation
-	values := make([]float64, len(sorted))
-	copy(values, sorted)
-	for i := 0; i < len(values); i++ {
-		for j := i + 1; j < len(values); j++ {
-			if values[i] > values[j] {
-				values[i], values[j] = values[j], values[i]
-			}
-		}
-	}
-
-	k := float64(len(values)-1) * p
-	f := math.Floor(k)
-	c := math.Ceil(k)
-	if f == c {
-		return values[int(k)]
-	}
-	return values[int(f)]*(c-k) + values[int(c)]*(k-f)
-}
-
-func calculateEMA(values []float64, alpha float64) float64 {
-	if len(values) == 0 {
-		return 0
-	}
-	ema := values[0]
-	for i := 1; i < len(values); i++ {
-		ema = alpha*values[i] + (1-alpha)*ema
-	}
-	return ema
-}
-
-func calculateTrend(values []float64) string {
-	if len(values) < 2 {
-		return "stable"
-	}
-	// Compare first 20% vs last 20%
-	startIdx := int(float64(len(values)) * 0.2)
-	endIdx := int(float64(len(values)) * 0.8)
-
-	if startIdx == 0 {
-		startIdx = 1
-	}
-	if endIdx >= len(values) {
-		endIdx = len(values) - 1
-	}
-
-	var startSum, endSum float64
-	for i := 0; i < startIdx; i++ {
-		startSum += values[i]
-	}
-	for i := endIdx; i < len(values); i++ {
-		endSum += values[i]
-	}
-
-	startAvg := startSum / float64(startIdx)
-	endAvg := endSum / float64(len(values)-endIdx)
-
-	diff := (endAvg - startAvg) / startAvg
-	if diff > 0.1 {
-		return "increasing"
-	} else if diff < -0.1 {
-		return "decreasing"
-	}
-	return "stable"
-}
-
-func extractRequests(metrics []models.MetricsPayload) []float64 {
-	result := make([]float64, len(metrics))
-	for i, m := range metrics {
-		result[i] = m.RequestsPerSec
-	}
-	return result
+// ServiceState represents the complete state of a service
+type ServiceState struct {
+	ServiceID   string                  `json:"service_id"`
+	Features    *models.ServiceFeatures `json:"features"`
+	EventStats  *models.EventStats      `json:"event_stats"`
+	LastUpdated time.Time               `json:"last_updated"`
 }
 
 func extractEventIDs(events []models.Event) []string {

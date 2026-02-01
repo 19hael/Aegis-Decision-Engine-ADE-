@@ -128,3 +128,76 @@ func (s *DecisionStore) GetTraceByDecisionID(ctx context.Context, decisionID str
 
 	return &trace, nil
 }
+
+// ListByFilters retrieves decisions matching filters
+func (s *DecisionStore) ListByFilters(ctx context.Context, filters models.DecisionFilters) ([]*models.DecisionRecord, error) {
+	query := `
+		SELECT id, decision_id, idempotency_key, service_id, policy_id, policy_version,
+			snapshot_id, decision_type, decision_result, actions, 
+			confidence_score, simulation_run_id, dry_run, executed_at, created_at
+		FROM decision_records WHERE 1=1`
+	
+	var args []interface{}
+	argCount := 0
+
+	if filters.ServiceID != "" {
+		argCount++
+		query += fmt.Sprintf(" AND service_id = $%d", argCount)
+		args = append(args, filters.ServiceID)
+	}
+	if filters.PolicyID != "" {
+		argCount++
+		query += fmt.Sprintf(" AND policy_id = $%d", argCount)
+		args = append(args, filters.PolicyID)
+	}
+	if !filters.From.IsZero() {
+		argCount++
+		query += fmt.Sprintf(" AND executed_at >= $%d", argCount)
+		args = append(args, filters.From)
+	}
+	if !filters.To.IsZero() {
+		argCount++
+		query += fmt.Sprintf(" AND executed_at <= $%d", argCount)
+		args = append(args, filters.To)
+	}
+	if filters.Result != "" {
+		argCount++
+		query += fmt.Sprintf(" AND decision_result = $%d", argCount)
+		args = append(args, filters.Result)
+	}
+
+	query += " ORDER BY executed_at DESC"
+
+	if filters.Limit > 0 {
+		argCount++
+		query += fmt.Sprintf(" LIMIT $%d", argCount)
+		args = append(args, filters.Limit)
+	}
+
+	rows, err := s.client.Pool().Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanDecisionRows(rows)
+}
+
+func scanDecisionRows(rows pgx.Rows) ([]*models.DecisionRecord, error) {
+	var decisions []*models.DecisionRecord
+	for rows.Next() {
+		var d models.DecisionRecord
+		err := rows.Scan(
+			&d.ID, &d.DecisionID, &d.IdempotencyKey, &d.ServiceID,
+			&d.PolicyID, &d.PolicyVersion, &d.SnapshotID,
+			&d.DecisionType, &d.DecisionResult, &d.Actions,
+			&d.ConfidenceScore, &d.SimulationRunID, &d.DryRun,
+			&d.ExecutedAt, &d.CreatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		decisions = append(decisions, &d)
+	}
+	return decisions, rows.Err()
+}

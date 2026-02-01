@@ -37,14 +37,14 @@ func NewService(webhookURL string, dryRun bool, logger *slog.Logger) *Service {
 
 // ActionRequest represents a request to execute an action
 type ActionRequest struct {
-	ActionID       string              `json:"action_id"`
-	DecisionID     string              `json:"decision_id"`
-	ActionType     models.ActionType   `json:"action_type"`
-	TargetService  string              `json:"target_service"`
-	Payload        map[string]interface{} `json:"payload"`
-	DryRun         bool                `json:"dry_run"`
-	ScheduledAt    *time.Time          `json:"scheduled_at,omitempty"`
-	WebhookURL     string              `json:"webhook_url,omitempty"`
+	ActionID      string                 `json:"action_id"`
+	DecisionID    string                 `json:"decision_id"`
+	ActionType    models.ActionType      `json:"action_type"`
+	TargetService string                 `json:"target_service"`
+	Payload       map[string]interface{} `json:"payload"`
+	DryRun        bool                   `json:"dry_run"`
+	ScheduledAt   *time.Time             `json:"scheduled_at,omitempty"`
+	WebhookURL    string                 `json:"webhook_url,omitempty"`
 }
 
 // Validate validates the action request
@@ -66,16 +66,16 @@ func (r *ActionRequest) Validate() error {
 
 // ActionResult represents the result of executing an action
 type ActionResult struct {
-	ActionID      string                 `json:"action_id"`
-	Status        string                 `json:"status"`
-	DryRun        bool                   `json:"dry_run"`
-	ExecutedAt    time.Time              `json:"executed_at"`
-	CompletedAt   *time.Time             `json:"completed_at,omitempty"`
-	ErrorMessage  string                 `json:"error_message,omitempty"`
-	WebhookURL    string                 `json:"webhook_url"`
-	ResponseCode  int                    `json:"response_code,omitempty"`
-	ResponseBody  string                 `json:"response_body,omitempty"`
-	Metadata      map[string]interface{} `json:"metadata,omitempty"`
+	ActionID     string                 `json:"action_id"`
+	Status       string                 `json:"status"`
+	DryRun       bool                   `json:"dry_run"`
+	ExecutedAt   time.Time              `json:"executed_at"`
+	CompletedAt  *time.Time             `json:"completed_at,omitempty"`
+	ErrorMessage string                 `json:"error_message,omitempty"`
+	WebhookURL   string                 `json:"webhook_url"`
+	ResponseCode int                    `json:"response_code,omitempty"`
+	ResponseBody string                 `json:"response_body,omitempty"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // Execute runs an action
@@ -212,26 +212,4 @@ func (s *Service) ExecuteBatch(ctx context.Context, requests []*ActionRequest) (
 	}
 
 	return results, nil
-}
-
-
-
-// GetActionTypeFromString converts string to ActionType
-func GetActionTypeFromString(s string) models.ActionType {
-	switch s {
-	case "scale_up":
-		return models.ActionTypeScaleUp
-	case "scale_down":
-		return models.ActionTypeScaleDown
-	case "throttle":
-		return models.ActionTypeThrottle
-	case "unthrottle":
-		return models.ActionTypeUnthrottle
-	case "open_circuit":
-		return models.ActionTypeOpenCircuit
-	case "close_circuit":
-		return models.ActionTypeCloseCircuit
-	default:
-		return models.ActionTypeWebhook
-	}
 }

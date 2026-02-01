@@ -34,7 +34,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	slog.Info("starting ADE server", "version", cfg.Version, "port", cfg.Port)
+	slog.Info("starting ADE server", "version", cfg.Version, "port", cfg.Server.Port)
 
 	// Initialize PostgreSQL
 	pgClient, err := postgres.NewClient(cfg)
@@ -47,7 +47,7 @@ func main() {
 	}
 
 	// Initialize Kafka
-	kafkaClient := kafka.NewClient(cfg.KafkaBrokers)
+	kafkaClient := kafka.NewClient(cfg.Kafka.Brokers[0])
 	if err := kafkaClient.Health(context.Background()); err != nil {
 		slog.Warn("kafka not available", "error", err)
 	}
@@ -125,7 +125,7 @@ func main() {
 	handler = recoveryMiddleware.Wrap(handler)
 
 	server := &http.Server{
-		Addr:         ":" + cfg.Port,
+		Addr:         ":" + cfg.Server.Port,
 		Handler:      handler,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
@@ -138,7 +138,7 @@ func main() {
 		}
 	}()
 
-	slog.Info("server started", "addr", server.Addr, "metrics", "http://localhost:"+cfg.Port+"/metrics")
+	slog.Info("server started", "addr", server.Addr, "metrics", "http://localhost:"+cfg.Server.Port+"/metrics")
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)

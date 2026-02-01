@@ -14,9 +14,9 @@ import (
 
 // Service handles event ingestion
 type Service struct {
-	eventStore *postgres.EventStore
+	eventStore  *postgres.EventStore
 	kafkaWriter *kafka.Writer
-	logger     *slog.Logger
+	logger      *slog.Logger
 }
 
 // NewService creates a new ingest service
@@ -44,19 +44,19 @@ type IngestRequest struct {
 // Validate validates the ingest request
 func (r *IngestRequest) Validate() error {
 	if r.EventID == "" {
-		return fmt.Errorf("event_id is required")
+		return models.NewValidationError("event_id", "event ID is required")
 	}
 	if r.IdempotencyKey == "" {
-		return fmt.Errorf("idempotency_key is required")
+		return models.NewValidationError("idempotency_key", "idempotency key is required")
 	}
 	if r.ServiceID == "" {
-		return fmt.Errorf("service_id is required")
+		return models.NewValidationError("service_id", "service ID is required")
 	}
 	if r.EventType == "" {
-		return fmt.Errorf("event_type is required")
+		return models.NewValidationError("event_type", "event type is required")
 	}
 	if len(r.Payload) == 0 {
-		return fmt.Errorf("payload is required")
+		return models.NewValidationError("payload", "payload is required")
 	}
 	if r.Timestamp.IsZero() {
 		r.Timestamp = time.Now()
@@ -92,9 +92,13 @@ func (s *Service) Ingest(ctx context.Context, req *IngestRequest) (*IngestRespon
 	}
 
 	// Store in database
-	if err := s.eventStore.Store(ctx, event); err != nil {
-		s.logger.Error("failed to store event", "error", err, "event_id", req.EventID)
-		return nil, fmt.Errorf("failed to store event: %w", err)
+	stored := false
+	if s.eventStore != nil {
+		if err := s.eventStore.Store(ctx, event); err != nil {
+			s.logger.Error("failed to store event", "error", err, "event_id", req.EventID)
+			return nil, fmt.Errorf("failed to store event: %w", err)
+		}
+		stored = true
 	}
 
 	// Publish to Kafka
@@ -117,7 +121,7 @@ func (s *Service) Ingest(ctx context.Context, req *IngestRequest) (*IngestRespon
 	return &IngestResponse{
 		EventID:   req.EventID,
 		Status:    "accepted",
-		Stored:    true,
+		Stored:    stored,
 		Published: published,
 		Timestamp: time.Now(),
 	}, nil
@@ -149,7 +153,6 @@ func (s *Service) IngestBatch(ctx context.Context, requests []*IngestRequest) ([
 		resp, err := s.Ingest(ctx, req)
 		if err != nil {
 			s.logger.Error("batch ingest failed for event", "error", err, "event_id", req.EventID)
-			// Continue with other events, don't fail the whole batch
 			resp = &IngestResponse{
 				EventID:   req.EventID,
 				Status:    "error",
@@ -163,3 +166,5 @@ func (s *Service) IngestBatch(ctx context.Context, requests []*IngestRequest) ([
 	
 	return responses, nil
 }
+
+

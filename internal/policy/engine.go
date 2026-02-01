@@ -25,13 +25,13 @@ func NewEngine(logger *slog.Logger) *Engine {
 
 // EvaluationResult represents the result of policy evaluation
 type EvaluationResult struct {
-	Matched       bool                   `json:"matched"`
-	RuleID        string                 `json:"rule_id,omitempty"`
-	Action        models.ActionType      `json:"action,omitempty"`
+	Matched       bool              `json:"matched"`
+	RuleID        string            `json:"rule_id,omitempty"`
+	Action        models.ActionType `json:"action,omitempty"`
 	ActionPayload map[string]interface{} `json:"action_payload,omitempty"`
-	Reason        string                 `json:"reason,omitempty"`
-	Confidence    float64                `json:"confidence"`
-	EvaluatedAt   time.Time              `json:"evaluated_at"`
+	Reason        string            `json:"reason,omitempty"`
+	Confidence    float64           `json:"confidence"`
+	EvaluatedAt   time.Time         `json:"evaluated_at"`
 }
 
 // Evaluate evaluates a policy against service features
@@ -39,7 +39,7 @@ func (e *Engine) Evaluate(ctx context.Context, policy *Policy, features *models.
 	start := time.Now()
 	allResults := make([]EvaluationResult, 0, len(policy.Rules))
 
-	// Sort rules by priority (highest first)
+	// Sort rules by priority (highest first) using bubble sort for simplicity
 	sortedRules := make([]Rule, len(policy.Rules))
 	copy(sortedRules, policy.Rules)
 	for i := 0; i < len(sortedRules); i++ {
@@ -68,7 +68,7 @@ func (e *Engine) Evaluate(ctx context.Context, policy *Policy, features *models.
 		}
 	}
 
-	// No rules matched - return default (allow)
+	// No rules matched - return default
 	return &EvaluationResult{
 		Matched:     false,
 		Reason:      "no rules matched",
@@ -88,7 +88,6 @@ func (e *Engine) evaluateRule(rule *Rule, features *models.ServiceFeatures) Eval
 		}
 	}
 
-	// Convert action type
 	actionType := models.ActionType(rule.Action.Type)
 
 	return EvaluationResult{
@@ -127,7 +126,7 @@ func (e *Engine) evaluateCondition(cond *Condition, features *models.ServiceFeat
 
 	// Simple condition evaluation
 	if cond.Fact == "" || cond.Op == "" {
-		return true // Empty condition matches
+		return true
 	}
 
 	factValue := getFactValue(cond.Fact, features)
@@ -139,12 +138,10 @@ func (e *Engine) evaluateCondition(cond *Condition, features *models.ServiceFeat
 }
 
 func getFactValue(fact string, features *models.ServiceFeatures) interface{} {
-	// Use reflection to get field value
 	v := reflect.ValueOf(features).Elem()
 	field := v.FieldByName(fact)
 	
 	if !field.IsValid() {
-		// Try common aliases
 		switch fact {
 		case "cpu":
 			field = v.FieldByName("CPUCurrent")
@@ -171,12 +168,10 @@ func getFactValue(fact string, features *models.ServiceFeatures) interface{} {
 }
 
 func compare(factValue interface{}, op string, targetValue interface{}) bool {
-	// Convert to float64 for numeric comparison
 	factNum := toFloat64(factValue)
 	targetNum := toFloat64(targetValue)
 
 	if factNum == nil || targetNum == nil {
-		// String comparison
 		factStr := fmt.Sprintf("%v", factValue)
 		targetStr := fmt.Sprintf("%v", targetValue)
 		switch op {
@@ -232,15 +227,12 @@ func toFloat64(v interface{}) *float64 {
 }
 
 func calculateConfidence(rule *Rule, features *models.ServiceFeatures) float64 {
-	// Simple confidence calculation based on rule priority and feature stability
 	baseConfidence := 0.8
 
-	// Higher priority rules get more confidence
 	if rule.Priority > 50 {
 		baseConfidence += 0.1
 	}
 
-	// Lower confidence if health is very low (uncertain situation)
 	if features.HealthScore < 0.3 {
 		baseConfidence -= 0.15
 	}

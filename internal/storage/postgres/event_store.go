@@ -47,6 +47,33 @@ func (s *EventStore) Store(ctx context.Context, event *models.Event) error {
 	return nil
 }
 
+// StoreBatch persists multiple events in a batch
+func (s *EventStore) StoreBatch(ctx context.Context, events []*models.Event) error {
+	return s.client.Transaction(ctx, func(tx pgx.Tx) error {
+		for _, event := range events {
+			query := `
+				INSERT INTO events (event_id, idempotency_key, service_id, event_type, payload, timestamp)
+				VALUES ($1, $2, $3, $4, $5, $6)
+				ON CONFLICT (idempotency_key) DO NOTHING
+				RETURNING id, created_at`
+
+			err := tx.QueryRow(ctx, query,
+				event.EventID,
+				event.IdempotencyKey,
+				event.ServiceID,
+				event.EventType,
+				event.Payload,
+				event.Timestamp,
+			).Scan(&event.ID, &event.CreatedAt)
+
+			if err != nil && err != pgx.ErrNoRows {
+				return fmt.Errorf("failed to store event %s: %w", event.EventID, err)
+			}
+		}
+		return nil
+	})
+}
+
 // GetByID retrieves an event by its ID
 func (s *EventStore) GetByID(ctx context.Context, eventID string) (*models.Event, error) {
 	query := `
@@ -60,7 +87,7 @@ func (s *EventStore) GetByID(ctx context.Context, eventID string) (*models.Event
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return nil, models.ErrNotFound
+			return nil, models.ErrEventNotFound
 		}
 		return nil, fmt.Errorf("failed to get event: %w", err)
 	}
@@ -111,31 +138,8 @@ func (s *EventStore) GetUnprocessed(ctx context.Context, limit int) ([]models.Ev
 	return scanEvents(rows)
 }
 
-func scanEvents(rows pgx.Rows) ([]models.Event, error) {
-	var events []models.Event
-	for rows.Next() {
-		var event models.Event
-		err := rows.Scan(
-			&event.ID, &event.EventID, &event.IdempotencyKey, &event.ServiceID,
-			&event.EventType, &event.Payload, &event.Timestamp, &event.ProcessedAt, &event.CreatedAt,
-		)
-		if err != nil {
-			return nil, err
-		}
-		events = append(events, event)
-	}
-	return events, rows.Err()
-}
-
-// EventStats contains statistics about events
-type EventStats struct {
-	TotalCount      int64     `json:"total_count"`
-	UnprocessedCount int64    `json:"unprocessed_count"`
-	LastEventAt     time.Time `json:"last_event_at"`
-}
-
-// GetStats returns statistics about events
-func (s *EventStore) GetStats(ctx context.Context, serviceID string) (*EventStats, error) {
+// GetStats returns statistics about events for a service
+func (s *EventStore) GetStats(ctx context.Context, serviceID string) (*models.EventStats, error) {
 	query := `
 		SELECT 
 			COUNT(*) as total,
@@ -144,7 +148,7 @@ func (s *EventStore) GetStats(ctx context.Context, serviceID string) (*EventStat
 		FROM events 
 		WHERE service_id = $1`
 
-	var stats EventStats
+	var stats models.EventStats
 	var lastEventAt *time.Time
 	
 	err := s.client.Pool().QueryRow(ctx, query, serviceID).Scan(
@@ -159,4 +163,20 @@ func (s *EventStore) GetStats(ctx context.Context, serviceID string) (*EventStat
 	}
 
 	return &stats, nil
+}
+
+func scanEvents(rows pgx.Rows) ([]models.Event, error) {
+	var events []models.Event
+	for rows.Next() {
+		var event models.Event
+		err := rows.Scan(
+			&event.ID, &event.EventID, &event.IdempotencyKey, &event.ServiceID,
+			&event.EventType, &event.Payload, &event.Timestamp, &event.ProcessedAt, &event.CreatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+	return events, rows.Err()
 }
