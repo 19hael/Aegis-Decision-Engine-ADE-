@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aegis-decision-engine/ade/internal/action"
 	"github.com/aegis-decision-engine/ade/internal/config"
 	"github.com/aegis-decision-engine/ade/internal/decision"
 	"github.com/aegis-decision-engine/ade/internal/ingest"
@@ -85,6 +86,10 @@ func main() {
 	simulationService := simulation.NewService(logger)
 	simulationHandler := simulation.NewHandler(simulationService)
 
+	// Initialize action service
+	actionService := action.NewService("", false, logger) // No default webhook, dry-run off
+	actionHandler := action.NewHandler(actionService)
+
 	// Setup routes
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
@@ -95,6 +100,7 @@ func main() {
 	stateHandler.RegisterRoutes(mux)
 	decisionHandler.RegisterRoutes(mux)
 	simulationHandler.RegisterRoutes(mux)
+	actionHandler.RegisterRoutes(mux)
 
 	server := &http.Server{
 		Addr:         ":" + cfg.Port,
