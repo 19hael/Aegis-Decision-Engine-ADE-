@@ -1,0 +1,127 @@
+syntax = "proto3";
+
+package ade;
+
+option go_package = "github.com/aegis-decision-engine/ade/api/proto;pb";
+
+import "google/protobuf/timestamp.proto";
+
+service DecisionService {
+  rpc Evaluate(EvaluateRequest) returns (EvaluateResponse);
+  rpc StreamDecisions(StreamDecisionsRequest) returns (stream Decision);
+  rpc GetDecision(GetDecisionRequest) returns (Decision);
+  rpc GetDecisionTrace(GetDecisionTraceRequest) returns (DecisionTrace);
+}
+
+service SimulationService {
+  rpc RunSimulation(RunSimulationRequest) returns (SimulationResult);
+  rpc StreamSimulationProgress(StreamSimulationRequest) returns (stream SimulationProgress);
+}
+
+message EvaluateRequest {
+  string service_id = 1;
+  string policy_id = 2;
+  Features features = 3;
+  bool dry_run = 4;
+  bool simulate = 5;
+  string idempotency_key = 6;
+}
+
+message EvaluateResponse {
+  string decision_id = 1;
+  string result = 2;
+  repeated Action actions = 3;
+  double confidence = 4;
+  string trace_id = 5;
+  bool dry_run = 6;
+  google.protobuf.Timestamp timestamp = 7;
+  string simulation_run_id = 8;
+}
+
+message Features {
+  double cpu_current = 1;
+  double cpu_avg_5m = 2;
+  double latency_p50 = 3;
+  double latency_p95 = 4;
+  double latency_p99 = 5;
+  double error_rate = 6;
+  double requests_per_second = 7;
+  int32 queue_depth = 8;
+  double health_score = 9;
+  double load_score = 10;
+  double throttling_risk = 11;
+}
+
+message Action {
+  string type = 1;
+  bytes payload = 2;
+  string target = 3;
+  double cost = 4;
+  double risk = 5;
+}
+
+message Decision {
+  string id = 1;
+  string service_id = 2;
+  string policy_id = 3;
+  string policy_version = 4;
+  string result = 5;
+  google.protobuf.Timestamp executed_at = 6;
+  double confidence = 7;
+}
+
+message DecisionTrace {
+  string trace_id = 1;
+  string decision_id = 2;
+  repeated RuleTrace rules_evaluated = 3;
+  int32 execution_time_ms = 4;
+}
+
+message RuleTrace {
+  string rule_id = 1;
+  string name = 2;
+  bool matched = 3;
+  string condition = 4;
+  string action = 5;
+  int32 priority = 6;
+}
+
+message StreamDecisionsRequest {
+  string service_id = 1;
+  google.protobuf.Timestamp from = 2;
+}
+
+message GetDecisionRequest {
+  string decision_id = 1;
+}
+
+message GetDecisionTraceRequest {
+  string decision_id = 1;
+}
+
+message RunSimulationRequest {
+  string service_id = 1;
+  string policy_id = 2;
+  string scenario = 3;
+  int32 horizon_minutes = 4;
+  int32 iterations = 5;
+  Features current_state = 6;
+}
+
+message SimulationResult {
+  string run_id = 1;
+  string status = 2;
+  double risk_score = 3;
+  string recommendation = 4;
+  double cost_projection = 5;
+}
+
+message StreamSimulationRequest {
+  string run_id = 1;
+}
+
+message SimulationProgress {
+  string run_id = 1;
+  int32 percent_complete = 2;
+  string status = 3;
+}

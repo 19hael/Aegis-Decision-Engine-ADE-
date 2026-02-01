@@ -1,0 +1,177 @@
+version: '3.8'
+
+services:
+  ade-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ade-server
+    ports:
+      - "8080:8080"
+    environment:
+      - ADE_PORT=8080
+      - DATABASE_URL=postgres://ade:ade@postgres:5432/ade?sslmode=disable
+      - REDIS_URL=redis://redis:6379/0
+      - KAFKA_BROKERS=redpanda:9092
+      - ADE_LOG_LEVEL=info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    networks:
+      - ade-network
+    restart: unless-stopped
+
+  ade-cli:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ade-cli
+    entrypoint: ["./ade-cli"]
+    environment:
+      - ADE_SERVER_URL=http://ade-server:8080
+    depends_on:
+      - ade-server
+    networks:
+      - ade-network
+    profiles:
+      - cli
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: ade-postgres
+    environment:
+      POSTGRES_USER: ade
+      POSTGRES_PASSWORD: ade
+      POSTGRES_DB: ade
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ade -d ade"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ade-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: ade-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ade-network
+
+  redpanda:
+    image: redpandadata/redpanda:v24.1.1
+    container_name: ade-redpanda
+    command:
+      - redpanda start
+      - --smp 1
+      - --memory 1G
+      - --reserve-memory 0M
+      - --overprovisioned
+      - --node-id 0
+      - --check=false
+      - --kafka-addr 0.0.0.0:9092
+      - --advertise-kafka-addr redpanda:9092
+      - --rpc-addr 0.0.0.0:33145
+      - --advertise-rpc-addr redpanda:33145
+    ports:
+      - "9092:9092"
+      - "9644:9644"
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ade-network
+
+  redpanda-init:
+    image: redpandadata/redpanda:v24.1.1
+    container_name: ade-redpanda-init
+    command: >
+      bash -c "
+        sleep 10 &&
+        rpk topic create ade.events --brokers redpanda:9092 || true &&
+        rpk topic create ade.actions --brokers redpanda:9092 || true
+      "
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    networks:
+      - ade-network
+    restart: on-failure
+
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: ade-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deployments/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    networks:
+      - ade-network
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: ade-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./deployments/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    networks:
+      - ade-network
+
+  migrate:
+    image: migrate/migrate:v4.17.0
+    container_name: ade-migrate
+    volumes:
+      - ./migrations:/migrations
+    command: ["-path", "/migrations", "-database", "postgres://ade:ade@postgres:5432/ade?sslmode=disable", "up"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ade-network
+    profiles:
+      - migrate
+
+volumes:
+  postgres_data:
+  redis_data:
+  redpanda_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  ade-network:
+    driver: bridge
