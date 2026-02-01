@@ -12,6 +12,7 @@ import (
 	"github.com/aegis-decision-engine/ade/internal/action"
 	"github.com/aegis-decision-engine/ade/internal/config"
 	"github.com/aegis-decision-engine/ade/internal/decision"
+	"github.com/aegis-decision-engine/ade/internal/feedback"
 	"github.com/aegis-decision-engine/ade/internal/ingest"
 	"github.com/aegis-decision-engine/ade/internal/policy"
 	"github.com/aegis-decision-engine/ade/internal/simulation"
@@ -90,6 +91,10 @@ func main() {
 	actionService := action.NewService("", false, logger) // No default webhook, dry-run off
 	actionHandler := action.NewHandler(actionService)
 
+	// Initialize feedback service
+	feedbackService := feedback.NewService(logger)
+	feedbackHandler := feedback.NewHandler(feedbackService)
+
 	// Setup routes
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
@@ -101,6 +106,7 @@ func main() {
 	decisionHandler.RegisterRoutes(mux)
 	simulationHandler.RegisterRoutes(mux)
 	actionHandler.RegisterRoutes(mux)
+	feedbackHandler.RegisterRoutes(mux)
 
 	server := &http.Server{
 		Addr:         ":" + cfg.Port,
