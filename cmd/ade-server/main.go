@@ -24,6 +24,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+// ADE Server - Aegis Decision Engine
+// Autonomous, Auditable, Simulation-Driven Decisioning for Real-Time Systems
+// This is the main entry point for the ADE server.
+
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
@@ -101,6 +105,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
 	mux.HandleFunc("/ready", readyHandler(pgClient))
+	mux.HandleFunc("/info", infoHandler)
 	mux.Handle("/metrics", promhttp.Handler())
 	
 	// Register service routes
@@ -156,10 +161,27 @@ func main() {
 	slog.Info("server stopped")
 }
 
+// GetVersionInfo returns the current server version information
+// This is useful for health checks and monitoring systems
+func GetVersionInfo() map[string]string {
+	return map[string]string{
+		"name":       "Aegis Decision Engine (ADE)",
+		"version":    "1.0.0",
+		"commit":     "dev",
+		"build_time": "2026-02-03",
+	}
+}
+
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status":"healthy"}`))
+}
+
+func infoHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"name":"Aegis Decision Engine (ADE)","version":"1.0.0","status":"operational"}`))
 }
 
 func readyHandler(pgClient *postgres.Client) http.HandlerFunc {
